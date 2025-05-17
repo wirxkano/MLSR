@@ -5,6 +5,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
+from torchvision import transforms
+from PIL import Image
+
 from trainer.trainer import Trainer
 from dataset.image_dataset import ImageDataset
 from model.idn import IDN
@@ -60,7 +63,7 @@ class SRTrainer(Trainer):
     # Get model
     def build_model(self):
         model = IDN(2, 64, 16, 4)
-        checkpoint = torch.load(self.pretrain_path, weights_only=True)
+        checkpoint = torch.load(self.pretrain_path, weights_only=True, map_location="cpu")
         model.load_state_dict(checkpoint['model'])
         return dict(
           final=model.to(self.device),
@@ -144,3 +147,32 @@ class SRTrainer(Trainer):
             
         return dict(pnsr=psnr.item(),
                     ssim=ssim.item())
+        
+    def inference(self, lr_img, weights_path):
+        lr_img = lr_img.crop((0, 0, lr_img.width - lr_img.width % (self.scale), lr_img.height - lr_img.height % (self.scale)))
+        lr_son = lr_img.resize((lr_img.width // self.scale, lr_img.height // self.scale), Image.BICUBIC)
+        lr_img = transforms.ToTensor()(lr_img)
+        lr_son = transforms.ToTensor()(lr_son)
+        
+        lr_img = lr_img.unsqueeze(0)
+        lr_son = lr_son.unsqueeze(0)
+        
+        lr_son, lr_img = lr_son.to(self.device), lr_img.to(self.device)
+        
+        self._load_snapshot(weights_path)
+        self.model["copy"].load_state_dict(self.model["final"].state_dict())
+        # Gradient update
+        for _ in range(self.grad_num):
+            self.model["copy"].train()
+            self.optimizer["copy"].zero_grad()
+            out = self.model["copy"](lr_son)
+            loss = self.criterion(out, lr_img)
+            loss.backward()
+            self.optimizer["copy"].step()
+            
+        self.model["copy"].eval()
+        with torch.no_grad():
+            out = self.model["copy"](lr_img)
+        
+        
+        return out.squeeze(0)

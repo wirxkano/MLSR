@@ -246,4 +246,7 @@ class Trainer(object):
     # Validate for each batch
     def validate_step(self):
         raise NotImplementedError("Please implement the validate_step method before calling")
+    
+    def inference(self):
+        raise NotImplementedError("Please implement the inference method before calling")
             
